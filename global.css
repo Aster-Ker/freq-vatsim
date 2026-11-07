@@ -1,0 +1,48 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import 'panelui-native/theme.css';
+
+/* Tailwind only generates the classes it can see, and the components live in
+   the package rather than in this project — without this line every one of
+   them renders unstyled, which reads like a broken install. */
+@source './node_modules/panelui-native/src';
+
+/*
+ * Type. Geist for the interface, Geist Mono for frequencies and other numeric
+ * readouts. On native a weight is a separately registered face, so each weight
+ * token names the family that was loaded for it in app/_layout.tsx. Every
+ * PanelUI component follows these tokens.
+ */
+@theme {
+  --font-normal: Geist_400Regular;
+  --font-medium: Geist_500Medium;
+  --font-semibold: Geist_600SemiBold;
+  --font-bold: Geist_700Bold;
+}
+
+@layer theme {
+  :root {
+    @variant ios {
+      --font-mono: GeistMono_500Medium;
+    }
+    @variant android {
+      --font-mono: GeistMono_500Medium;
+    }
+
+    /*
+     * Moon dark, flattened onto the neutral dark ladder from the design rules:
+     * #000000 page, then #181818, #1F1F1F and #272727 for each step forward.
+     */
+    @variant moon-dark {
+      --color-background: #000000;
+      --color-card: #181818;
+      --color-popover: #1f1f1f;
+      --color-overlay: #272727;
+      --color-surface: #181818;
+      --color-surface-secondary: #1f1f1f;
+      --color-surface-tertiary: #272727;
+      --color-border: #272727;
+      --color-input: #313131;
+    }
+  }
+}
