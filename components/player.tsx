@@ -17,16 +17,18 @@ import { Button } from 'panelui-native/components/button';
 import { ArrowClockwiseIcon, ArrowSquareOutIcon, CaretDownIcon, StopIcon, SubtitlesIcon } from './icons';
 import { ListenWebView, type ListenWebViewHandle } from './listen-webview';
 import { LiveStage } from './live-stage';
+import { speakerText } from './speaker';
 import { FacilityTag } from './station-row';
 import { SubtitlesSheet } from './subtitles-sheet';
 import { EASE_OUT, useTokens } from './tokens';
 import { T } from './type';
 import { backgroundPlaybackAvailable } from '@/modules/freq-playback';
-import { useCaptions } from '@/lib/captions';
+import { currentSpeaker, useCaptions } from '@/lib/captions';
 import { useFeed } from '@/lib/feed';
 import { useListen } from '@/lib/listen';
 import { usePrefs } from '@/lib/prefs';
 import { useStream, type Stream, type StreamPhase } from '@/lib/stream';
+import { useTuned } from '@/lib/tuned';
 import { facilityLabel, listenUrl } from '@/lib/vatsim';
 
 const easing = Easing.bezier(...EASE_OUT);
@@ -41,7 +43,7 @@ const clock = (seconds: number) => {
 
 type BadgeStatus = 'loading' | 'success' | 'danger' | 'neutral' | 'warning' | 'info';
 
-function badgeFor(phase: StreamPhase, receiving: boolean): { status: BadgeStatus; label: string } {
+function badgeFor(phase: StreamPhase): { status: BadgeStatus; label: string } {
   switch (phase) {
     case 'loading':
       return { status: 'loading', label: 'Connecting' };
@@ -50,9 +52,9 @@ function badgeFor(phase: StreamPhase, receiving: boolean): { status: BadgeStatus
     case 'waiting':
       return { status: 'neutral', label: 'Press play' };
     case 'live':
-      return receiving
-        ? { status: 'success', label: 'Receiving' }
-        : { status: 'success', label: 'On frequency' };
+      // Steady green while connected, whether anyone is talking or not. The
+      // badge pulses during a transmission.
+      return { status: 'success', label: 'Online' };
     case 'stopped':
       return { status: 'warning', label: 'Stopped' };
     case 'error':
@@ -154,7 +156,7 @@ export function PlayerLayer() {
   const url = listenUrl(station.callsign);
   const stillOnline = !data || data.stations.some((s) => s.callsign === station.callsign);
   const badge = stillOnline
-    ? badgeFor(stream.phase, stream.receiving)
+    ? badgeFor(stream.phase)
     : { status: 'warning' as const, label: 'Station offline' };
   const used = usedSeconds(now);
   const native = stream.phase === 'live' && !showPage;
@@ -322,11 +324,20 @@ const exit = FadeOutDown.duration(300).easing(easing);
 
 function MiniPlayer({ stream, onExpand }: { stream: Stream; onExpand: () => void }) {
   const { station, stop } = useListen();
-  const { active, lines, partial } = useCaptions();
+  const captions = useCaptions();
+  const { active, lines, partial } = captions;
+  const tuned = useTuned();
   const tokens = useTokens();
   const insets = useSafeAreaInsets();
   if (!station) return null;
-  const badge = badgeFor(stream.phase, stream.receiving);
+  const badge = badgeFor(stream.phase);
+  const match = stream.phase === 'live' && stream.receiving ? currentSpeaker(captions) : null;
+  // The station's own callsign is already the title, so a controller call shows who it is calling.
+  const talking = match
+    ? match.role === 'atc'
+      ? `→ ${match.callsign}`
+      : speakerText(match, station.callsign, tuned.pilot).who
+    : null;
   // With subtitles on, the second line follows the frequency as text.
   const lastLine = lines[lines.length - 1];
   const caption = active
@@ -353,10 +364,17 @@ function MiniPlayer({ stream, onExpand }: { stream: Stream; onExpand: () => void
             <T variant="title-4" numberOfLines={1}>
               {station.callsign}
             </T>
-            {caption ? (
-              <T variant="caption-5" muted numberOfLines={1}>
-                {caption}
-              </T>
+            {talking || caption ? (
+              <View className="flex-row items-center gap-2">
+                {talking ? (
+                  <T variant="readout-xs" className="text-primary">
+                    {talking}
+                  </T>
+                ) : null}
+                <T variant="caption-5" muted numberOfLines={1} className="flex-1">
+                  {caption || 'talking'}
+                </T>
+              </View>
             ) : (
               <View className="flex-row items-center gap-2">
                 <T variant="readout-xs" muted>
@@ -367,7 +385,7 @@ function MiniPlayer({ stream, onExpand }: { stream: Stream; onExpand: () => void
                   muted={!(stream.phase === 'live' && stream.receiving)}
                   className={stream.phase === 'live' && stream.receiving ? 'text-primary' : undefined}
                 >
-                  {badge.label}
+                  {stream.phase === 'live' && stream.receiving ? 'Receiving' : badge.label}
                 </T>
               </View>
             )}

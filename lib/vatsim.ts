@@ -24,8 +24,7 @@ export const FACILITIES: { key: FacilityKey; label: string }[] = [
   { key: 'ATIS', label: 'ATIS' },
 ];
 
-export const facilityLabel = (key: FacilityKey) =>
-  FACILITIES.find((f) => f.key === key)?.label ?? key;
+export const facilityLabel = (key: FacilityKey) => FACILITIES.find((f) => f.key === key)?.label ?? key;
 
 export type Station = {
   callsign: string;
@@ -44,8 +43,19 @@ export type Station = {
   atisCode: string | null;
 };
 
+/** A connected pilot, reduced to what the player shows next to a callsign. */
+export type Pilot = {
+  callsign: string;
+  /** ICAO type, "A20N"; empty without a flight plan. */
+  aircraft: string;
+  departure: string;
+  arrival: string;
+};
+
 export type FeedSnapshot = {
   stations: Station[];
+  /** Every connected pilot, by callsign. */
+  pilots: Map<string, Pilot>;
   updatedAt: string;
   connectedClients: number;
 };
@@ -62,8 +72,14 @@ type RawController = {
   atis_code?: string | null;
 };
 
+type RawPilot = {
+  callsign: string;
+  flight_plan?: { aircraft_short?: string; departure?: string; arrival?: string } | null;
+};
+
 type RawFeed = {
   general: { update_timestamp: string; connected_clients: number };
+  pilots?: RawPilot[];
   controllers: RawController[];
   atis: RawController[];
   ratings: { id: number; short: string; long: string }[];
@@ -133,11 +149,23 @@ export function parseFeed(feed: RawFeed): FeedSnapshot {
     (a, b) =>
       a.area.localeCompare(b.area) ||
       ORDER.indexOf(a.facility) - ORDER.indexOf(b.facility) ||
-      a.callsign.localeCompare(b.callsign)
+      a.callsign.localeCompare(b.callsign),
   );
+
+  const pilots = new Map<string, Pilot>();
+  for (const p of feed.pilots ?? []) {
+    const callsign = p.callsign.toUpperCase();
+    pilots.set(callsign, {
+      callsign,
+      aircraft: p.flight_plan?.aircraft_short ?? '',
+      departure: p.flight_plan?.departure ?? '',
+      arrival: p.flight_plan?.arrival ?? '',
+    });
+  }
 
   return {
     stations,
+    pilots,
     updatedAt: feed.general.update_timestamp,
     connectedClients: feed.general.connected_clients,
   };
@@ -165,4 +193,43 @@ export function onlineFor(logonTime: string, now = Date.now()): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return m ? `${h} h ${m} min` : `${h} h`;
+}
+
+// Who is tuned in
+
+export const TRANSCEIVERS_URL = 'https://data.vatsim.net/v3/transceivers-data.json';
+
+type RawTransceivers = { callsign: string; transceivers: { frequency: number }[] }[];
+
+/**
+ * Every connected client's radios: callsign to the frequencies it has tuned,
+ * written the way the main feed writes them ("118.505"). This is how VATSIM's
+ * own AFV map matches radios to positions.
+ */
+export async function fetchTuned(signal?: AbortSignal): Promise<Map<string, string[]>> {
+  const res = await fetch(TRANSCEIVERS_URL, { signal, headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`The VATSIM transceivers feed answered ${res.status}.`);
+  const raw = (await res.json()) as RawTransceivers;
+  const tuned = new Map<string, string[]>();
+  for (const client of raw) {
+    tuned.set(
+      client.callsign.toUpperCase(),
+      client.transceivers.map((t) => (t.frequency / 1_000_000).toFixed(3)),
+    );
+  }
+  return tuned;
+}
+
+/** Pilots with a radio on this frequency. */
+export function pilotsOn(
+  frequency: string,
+  tuned: Map<string, string[]>,
+  pilots: Map<string, Pilot>,
+): Pilot[] {
+  const out: Pilot[] = [];
+  for (const [callsign, freqs] of tuned) {
+    const pilot = pilots.get(callsign);
+    if (pilot && freqs.includes(frequency)) out.push(pilot);
+  }
+  return out.sort((a, b) => a.callsign.localeCompare(b.callsign));
 }

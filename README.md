@@ -60,6 +60,15 @@ Freq does not connect to the voice network itself. VATSIM only lets approved cli
 
 VATSIM Listen keeps running in a WebView inside the player, but it only shows when it needs you: to sign in, to press play, or when it stops (for example when VATSIM limits listening time). Once it is playing, Freq's own screen covers it, with the frequency, a level meter driven by the real audio, a receiving indicator and the subtitles. **Show Listen page** brings the page back at any time. The audio tap in `lib/audio-tap.ts` reports whether the page is playing and how loud it is, so none of this depends on how VATSIM lays out its page.
 
+### Who is talking
+
+While someone transmits, the player names them, and each subtitle line carries a speaker tag. VATSIM Listen knows the transmitting callsign but does not share it, so Freq works it out from two things it can see:
+
+1. **Who is tuned in.** VATSIM's public transceivers feed lists every pilot's radio frequencies. While a station plays, Freq checks it once a minute for the pilots tuned to that frequency (`lib/tuned.tsx`).
+2. **What was said.** `lib/callsigns.ts` looks for one of those callsigns in the subtitles, by airline name and flight number ("speedbird four one two" is BAW412), by flight number alone when only one tuned aircraft has it, or by a spelled out registration. Where the callsign sits says who spoke: first is the controller calling that aircraft, last is the pilot reading back, and after a station name ("London, Speedbird 412") is the pilot's first call.
+
+It is an inference, so the player labels it "from subtitles", and it needs subtitles on. The badge in the corner stays a steady green **Online** while the page is playing and pulses during a transmission.
+
 ### Background audio
 
 The WebView that plays Listen is mounted once at the root (`components/player.tsx`) and never unmounted during a session. Minimising the player slides it off screen. `react-native-webview` does not pause on app background, so the audio keeps going as long as Android keeps the process running. The foreground service in `modules/freq-playback` is what keeps it running. Stop in the notification, or pause on the lock screen, ends the session and tells the JS side through an `onStopRequest` event.
@@ -121,6 +130,8 @@ lib/listen.tsx             session state, listening time tally, foreground servi
 lib/prefs.tsx              saved stations and settings (AsyncStorage)
 lib/audio-tap.ts           script injected into the Listen page to tap its audio
 lib/stream.ts              what the hidden Listen page is doing: phase, audio level, receiving
+lib/tuned.tsx              pilots tuned to the playing frequency (transceivers feed)
+lib/callsigns.ts           who is talking: callsigns found in subtitles, and who said them
 lib/captions.tsx           subtitle state: model download, recognizer lifecycle, lines
 lib/atc-text.ts            spoken numbers to ATC notation
 lib/caption-demo.ts        sample subtitles for the web design preview only

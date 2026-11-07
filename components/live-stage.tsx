@@ -6,7 +6,10 @@ import { CaptionsPanel } from './captions-panel';
 import { BrowserIcon, SubtitlesIcon } from './icons';
 import { EASE_OUT, useTokens } from './tokens';
 import { T } from './type';
-import { useCaptions } from '@/lib/captions';
+import { currentSpeaker, useCaptions } from '@/lib/captions';
+import { useListen } from '@/lib/listen';
+import { useTuned } from '@/lib/tuned';
+import { speakerText } from './speaker';
 import type { Stream } from '@/lib/stream';
 
 const arrive = FadeIn.duration(300).easing(Easing.bezier(...EASE_OUT));
@@ -33,7 +36,31 @@ function quietLabel(ms: number) {
 export function LiveStage({ stream, now, frequency, onShowPage, onSubtitles }: Props) {
   const tokens = useTokens();
   const captions = useCaptions();
+  const tuned = useTuned();
+  const { station } = useListen();
   const since = stream.quietSince();
+
+  const match = stream.receiving ? currentSpeaker(captions, now) : null;
+  const speaker = match && station ? speakerText(match, station.callsign, tuned.pilot) : null;
+
+  let title: string;
+  let detail: string;
+  if (stream.receiving) {
+    title = speaker ? speaker.who : 'Receiving';
+    detail = speaker
+      ? `${speaker.detail} · from subtitles`
+      : captions.active
+        ? 'Someone is transmitting'
+        : 'Turn on subtitles to see who is talking';
+  } else {
+    title = 'On frequency';
+    detail = quietLabel(since ? now - since : 0);
+  }
+  const aircraft = tuned.known
+    ? tuned.pilots.length === 1
+      ? '1 aircraft tuned in'
+      : `${tuned.pilots.length} aircraft tuned in`
+    : null;
 
   return (
     <Animated.View entering={arrive} className="absolute inset-0 gap-3 bg-surface p-3">
@@ -54,10 +81,21 @@ export function LiveStage({ stream, now, frequency, onShowPage, onSubtitles }: P
           className="w-full"
         />
         <View className="items-center gap-0.5" accessibilityLiveRegion="polite">
-          <T variant="title-3">{stream.receiving ? 'Receiving' : 'On frequency'}</T>
-          <T variant="caption-5" muted>
-            {stream.receiving ? 'Someone is transmitting' : quietLabel(since ? now - since : 0)}
+          <T
+            variant={speaker ? 'readout-md' : 'title-3'}
+            className={speaker ? 'text-primary' : undefined}
+            accessibilityLabel={speaker ? `Transmitting: ${speaker.who}` : undefined}
+          >
+            {title}
           </T>
+          <T variant="caption-5" muted numberOfLines={1}>
+            {detail}
+          </T>
+          {aircraft && !stream.receiving ? (
+            <T variant="caption-5" muted>
+              {aircraft}
+            </T>
+          ) : null}
         </View>
       </View>
 

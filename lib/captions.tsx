@@ -1,10 +1,25 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Platform } from 'react-native';
-import { captions as nativeCaptions, nativeAvailable, updateBackgroundSession } from '@/modules/freq-playback';
+import {
+  captions as nativeCaptions,
+  nativeAvailable,
+  updateBackgroundSession,
+} from '@/modules/freq-playback';
 import { formatTransmission } from './atc-text';
+import { matchCallsign, type CallsignMatch } from './callsigns';
 import { demoCaptionSource } from './caption-demo';
 import { sessionText, useListen } from './listen';
 import { usePrefs } from './prefs';
+import { useTuned } from './tuned';
 
 /**
  * In-app subtitles.
@@ -17,7 +32,8 @@ import { usePrefs } from './prefs';
 
 export type ModelState = 'unavailable' | 'missing' | 'downloading' | 'installed';
 export type EngineState = 'idle' | 'starting' | 'ready' | 'error';
-export type CaptionLine = { id: number; text: string; at: number };
+/** who: the callsign this transmission most likely belongs to, inferred from the words (lib/callsigns.ts). */
+export type CaptionLine = { id: number; text: string; at: number; who: CallsignMatch | null };
 
 type CaptionsState = {
   model: ModelState;
@@ -30,6 +46,8 @@ type CaptionsState = {
   active: boolean;
   lines: CaptionLine[];
   partial: string;
+  /** The callsign in the phrase being spoken, once it has been said. */
+  partialWho: CallsignMatch | null;
   download: () => Promise<void>;
   removeModel: () => void;
   /** PCM from the WebView tap; ignored unless subtitles are active. */
@@ -49,9 +67,12 @@ const source =
 export function CaptionsProvider({ children }: { children: ReactNode }) {
   const { station } = useListen();
   const { subtitles, setSubtitles, backgroundPlayback } = usePrefs();
+  const { candidates } = useTuned();
+  const candidatesRef = useRef(candidates);
+  candidatesRef.current = candidates;
 
   const [model, setModel] = useState<ModelState>(() =>
-    !source.available ? 'unavailable' : source.isModelInstalled() ? 'installed' : 'missing'
+    !source.available ? 'unavailable' : source.isModelInstalled() ? 'installed' : 'missing',
   );
   const [progress, setProgress] = useState(0);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -59,6 +80,7 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
   const [engineError, setEngineError] = useState<string | null>(null);
   const [lines, setLines] = useState<CaptionLine[]>([]);
   const [partial, setPartial] = useState('');
+  const [partialWho, setPartialWho] = useState<CallsignMatch | null>(null);
   const seq = useRef(0);
 
   const active = subtitles && model === 'installed' && !!station;
@@ -68,9 +90,15 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const subs = [
       source.onCaption(({ text, final }) => {
-        if (!final) return setPartial(text ? formatTransmission(text) : '');
+        const who = text ? matchCallsign(text, candidatesRef.current) : null;
+        if (!final) {
+          setPartial(text ? formatTransmission(text) : '');
+          setPartialWho(who);
+          return;
+        }
         setPartial('');
-        const line = { id: ++seq.current, text: formatTransmission(text), at: Date.now() };
+        setPartialWho(null);
+        const line = { id: ++seq.current, text: formatTransmission(text), at: Date.now(), who };
         setLines((prev) => [...prev.slice(-(MAX_LINES - 1)), line]);
       }),
       source.onState((e) => {
@@ -92,6 +120,7 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
       source.stop();
       setEngine('idle');
       setPartial('');
+      setPartialWho(null);
     }
   }, [active]);
 
@@ -101,6 +130,7 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
     source.flush();
     setLines([]);
     setPartial('');
+    setPartialWho(null);
   }, [callsign]);
 
   // The latest line rides along in the notification, so it can be read from
@@ -128,7 +158,7 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
     } catch (e) {
       setModel('missing');
       setDownloadError(
-        e instanceof Error && e.message ? e.message : 'The subtitle model did not download. Try again.'
+        e instanceof Error && e.message ? e.message : 'The subtitle model did not download. Try again.',
       );
     }
   }, [setSubtitles]);
@@ -149,11 +179,25 @@ export function CaptionsProvider({ children }: { children: ReactNode }) {
       active,
       lines,
       partial,
+      partialWho,
       download,
       removeModel,
       feed,
     }),
-    [model, progress, downloadError, engine, engineError, active, lines, partial, download, removeModel, feed]
+    [
+      model,
+      progress,
+      downloadError,
+      engine,
+      engineError,
+      active,
+      lines,
+      partial,
+      partialWho,
+      download,
+      removeModel,
+      feed,
+    ],
   );
 
   return <CaptionsContext.Provider value={value}>{children}</CaptionsContext.Provider>;
@@ -163,4 +207,17 @@ export function useCaptions() {
   const ctx = useContext(CaptionsContext);
   if (!ctx) throw new Error('useCaptions must be used inside CaptionsProvider');
   return ctx;
+}
+
+/** How long a finished line still counts as "who is talking" after it ends. */
+const SPEAKER_HOLD_MS = 4000;
+
+/**
+ * Who is talking right now, as far as the subtitles tell: the callsign in
+ * the phrase being spoken, or in the line that just finished.
+ */
+export function currentSpeaker(c: Pick<CaptionsState, 'partialWho' | 'lines'>, now = Date.now()) {
+  if (c.partialWho) return c.partialWho;
+  const last = c.lines[c.lines.length - 1];
+  return last && last.who && now - last.at < SPEAKER_HOLD_MS ? last.who : null;
 }

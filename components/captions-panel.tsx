@@ -6,6 +6,9 @@ import { XIcon } from './icons';
 import { EASE_OUT, useTokens } from './tokens';
 import { T } from './type';
 import { useCaptions } from '@/lib/captions';
+import { useListen } from '@/lib/listen';
+import { useTuned } from '@/lib/tuned';
+import { speakerText } from './speaker';
 import { usePrefs } from '@/lib/prefs';
 
 const arrive = FadeIn.duration(300).easing(Easing.bezier(...EASE_OUT));
@@ -21,7 +24,11 @@ const clockTime = (at: number) => {
  */
 /** fill: stretch to the space available instead of a fixed five line window. */
 export function CaptionsPanel({ fill = false }: { fill?: boolean }) {
-  const { active, engine, engineError, lines, partial } = useCaptions();
+  const { active, engine, engineError, lines, partial, partialWho } = useCaptions();
+  const { station } = useListen();
+  const tuned = useTuned();
+  const tagFor = (who: (typeof lines)[number]['who']) =>
+    who && station ? speakerText(who, station.callsign, tuned.pilot).tag : null;
   const { setSubtitles } = usePrefs();
   const tokens = useTokens();
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -80,9 +87,16 @@ export function CaptionsPanel({ fill = false }: { fill?: boolean }) {
             <T variant="readout-xs" muted className="pt-0.5">
               {clockTime(line.at)}
             </T>
-            <T variant="body-6" className="flex-1" selectable>
-              {line.text}
-            </T>
+            <View className="flex-1 gap-0.5">
+              {tagFor(line.who) ? (
+                <T variant="readout-xs" className="text-primary" numberOfLines={1}>
+                  {tagFor(line.who)}
+                </T>
+              ) : null}
+              <T variant="body-6" selectable>
+                {line.text}
+              </T>
+            </View>
           </Animated.View>
         ))}
         {partial ? (
@@ -90,9 +104,16 @@ export function CaptionsPanel({ fill = false }: { fill?: boolean }) {
             <T variant="readout-xs" muted className="pt-0.5">
               {clockTime(Date.now())}
             </T>
-            <T variant="body-6" muted className="flex-1">
-              {partial}
-            </T>
+            <View className="flex-1 gap-0.5">
+              {tagFor(partialWho) ? (
+                <T variant="readout-xs" className="text-primary" numberOfLines={1}>
+                  {tagFor(partialWho)}
+                </T>
+              ) : null}
+              <T variant="body-6" muted>
+                {partial}
+              </T>
+            </View>
           </View>
         ) : null}
       </ScrollView>

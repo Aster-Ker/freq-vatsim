@@ -18,6 +18,7 @@ import { CaptionsProvider } from '@/lib/captions';
 import { FeedProvider } from '@/lib/feed';
 import { ListenProvider } from '@/lib/listen';
 import { PrefsProvider } from '@/lib/prefs';
+import { TunedProvider } from '@/lib/tuned';
 
 // Dark by default: most listening happens at night, beside a sim. Settings can switch it.
 Uniwind.setTheme('moon-dark');
@@ -88,9 +89,11 @@ export default function RootLayout() {
         <PrefsProvider>
           <FeedProvider>
             <ListenProvider>
-              <CaptionsProvider>
-                <ThemedNavigation />
-              </CaptionsProvider>
+              <TunedProvider>
+                <CaptionsProvider>
+                  <ThemedNavigation />
+                </CaptionsProvider>
+              </TunedProvider>
             </ListenProvider>
           </FeedProvider>
         </PrefsProvider>
