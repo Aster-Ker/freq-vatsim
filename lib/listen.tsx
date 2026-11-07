@@ -1,5 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   addStopRequestListener,
   requestNotificationPermission,
@@ -10,11 +19,11 @@ import { usePrefs } from './prefs';
 import { facilityLabel, type Station } from './vatsim';
 
 /**
- * VATSIM Listen allows 15 minutes of listening per hour. The service enforces
- * it; this is a local tally so the limit is not a surprise. It only counts
- * time spent in this app.
+ * A local tally of listening time over the last 60 minutes: only time the
+ * Listen page was actually playing, in this app, on this phone. VATSIM sets
+ * and enforces any limit itself (it can change it or turn it off), so the app
+ * shows the time without claiming a limit.
  */
-export const LISTEN_BUDGET_SECONDS = 15 * 60;
 const HOUR_MS = 60 * 60 * 1000;
 const USAGE_KEY = 'freq.usage.v1';
 
@@ -34,6 +43,8 @@ type ListenState = {
   setStatus: (status: ListenStatus) => void;
   /** Seconds listened in the last 60 minutes, by this device's count. */
   usedSeconds: (now?: number) => number;
+  /** The Listen page started or stopped playing; listening time counts only while it plays. */
+  markPlaying: (playing: boolean) => void;
 };
 
 const ListenContext = createContext<ListenState | null>(null);
@@ -88,14 +99,25 @@ export function ListenProvider({ children }: { children: ReactNode }) {
     (next: Station) => {
       closeSegment();
       const now = Date.now();
-      segments.current.push({ start: now, end: null });
-      persist();
       setStation(next);
       setStatus('loading');
       setExpanded(true);
       setStartedAt(now);
     },
-    [closeSegment, persist]
+    [closeSegment],
+  );
+
+  const markPlaying = useCallback(
+    (playing: boolean) => {
+      const open = segments.current.some((s) => s.end === null);
+      if (playing && !open) {
+        segments.current.push({ start: Date.now(), end: null });
+        persist();
+      } else if (!playing && open) {
+        closeSegment();
+      }
+    },
+    [closeSegment, persist],
   );
 
   // The foreground service follows the session and the setting, so turning the
@@ -142,8 +164,9 @@ export function ListenProvider({ children }: { children: ReactNode }) {
       collapse: () => setExpanded(false),
       setStatus,
       usedSeconds,
+      markPlaying,
     }),
-    [station, status, expanded, startedAt, open, stop, usedSeconds]
+    [station, status, expanded, startedAt, open, stop, usedSeconds, markPlaying],
   );
 
   return <ListenContext.Provider value={value}>{children}</ListenContext.Provider>;

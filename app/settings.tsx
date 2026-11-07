@@ -145,8 +145,9 @@ export default function Settings() {
       <Section title="Where the audio comes from">
         <T variant="body-6" muted>
           Audio plays through VATSIM Listen, the network's own listening service. You sign in with your VATSIM
-          account the first time. VATSIM allows 15 minutes of listening per hour and caps how many people can
-          listen at once, so at busy times it may ask you to try again later.
+          account the first time. VATSIM can limit how long each person listens per hour and how many people
+          listen at once, and changes those limits as it needs to. When one applies, the Listen page tells
+          you.
         </T>
         <T variant="body-6" muted>
           The station list comes from the public VATSIM data feed and refreshes every 30 seconds while the app

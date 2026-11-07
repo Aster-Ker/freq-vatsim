@@ -11,22 +11,22 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ListenWebView, type ListenWebViewHandle } from './listen-webview';
 import { AnimatedBadge } from 'panelui-native/components/animated-badge';
 import { Alert } from 'panelui-native/components/alert';
 import { Button } from 'panelui-native/components/button';
-import { Meter } from 'panelui-native/components/meter';
 import { ArrowClockwiseIcon, ArrowSquareOutIcon, CaretDownIcon, StopIcon, SubtitlesIcon } from './icons';
+import { ListenWebView, type ListenWebViewHandle } from './listen-webview';
+import { LiveStage } from './live-stage';
 import { FacilityTag } from './station-row';
-import { CaptionsPanel } from './captions-panel';
 import { SubtitlesSheet } from './subtitles-sheet';
 import { EASE_OUT, useTokens } from './tokens';
 import { T } from './type';
 import { backgroundPlaybackAvailable } from '@/modules/freq-playback';
 import { useCaptions } from '@/lib/captions';
 import { useFeed } from '@/lib/feed';
-import { LISTEN_BUDGET_SECONDS, useListen, type ListenStatus } from '@/lib/listen';
+import { useListen } from '@/lib/listen';
 import { usePrefs } from '@/lib/prefs';
+import { useStream, type Stream, type StreamPhase } from '@/lib/stream';
 import { facilityLabel, listenUrl } from '@/lib/vatsim';
 
 const easing = Easing.bezier(...EASE_OUT);
@@ -39,15 +39,50 @@ const clock = (seconds: number) => {
   return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
 };
 
-const STATUS_BADGE: Record<
-  ListenStatus,
-  { status: 'loading' | 'success' | 'danger' | 'neutral'; label: string }
-> = {
-  idle: { status: 'neutral', label: 'Idle' },
-  loading: { status: 'loading', label: 'Connecting' },
-  ready: { status: 'success', label: 'Listen open' },
-  error: { status: 'danger', label: 'Not loaded' },
-};
+type BadgeStatus = 'loading' | 'success' | 'danger' | 'neutral' | 'warning' | 'info';
+
+function badgeFor(phase: StreamPhase, receiving: boolean): { status: BadgeStatus; label: string } {
+  switch (phase) {
+    case 'loading':
+      return { status: 'loading', label: 'Connecting' };
+    case 'signin':
+      return { status: 'info', label: 'Sign in' };
+    case 'waiting':
+      return { status: 'neutral', label: 'Press play' };
+    case 'live':
+      return receiving
+        ? { status: 'success', label: 'Receiving' }
+        : { status: 'success', label: 'On frequency' };
+    case 'stopped':
+      return { status: 'warning', label: 'Stopped' };
+    case 'error':
+      return { status: 'danger', label: 'Not loaded' };
+  }
+}
+
+/** Why the Listen page is on screen, in one line, and the way back when there is one. */
+function PageBanner({ phase, onBack }: { phase: StreamPhase; onBack: () => void }) {
+  const text: Record<StreamPhase, string> = {
+    loading: 'Opening VATSIM Listen.',
+    signin: 'Sign in with your VATSIM account. Freq switches to its own player once the audio starts.',
+    waiting: 'Press play on the Listen page. Freq switches to its own player once the audio starts.',
+    stopped: 'Listen stopped playing. If VATSIM has limited your listening time, the page below says so.',
+    live: 'This is the Listen page. The audio keeps playing.',
+    error: 'The Listen page did not load.',
+  };
+  return (
+    <View className="flex-row items-center gap-3 border-b border-border bg-surface px-3 py-2">
+      <T variant="caption-5" muted className="flex-1">
+        {text[phase]}
+      </T>
+      {phase === 'live' ? (
+        <Button size="xs" variant="secondary" onPress={onBack}>
+          Back to player
+        </Button>
+      ) : null}
+    </View>
+  );
+}
 
 function useTick(active: boolean) {
   const [now, setNow] = useState(Date.now());
@@ -65,6 +100,10 @@ function useTick(active: boolean) {
  * never unmounted while a station is playing: the WebView inside it carries
  * the audio, so minimising the player slides it off screen rather than
  * removing it.
+ *
+ * The VATSIM Listen page only shows while it needs you: to sign in, to press
+ * play, or when it has stopped. Once it is playing, the player's own screen
+ * (LiveStage) covers it and the page keeps running underneath.
  */
 export function PlayerLayer() {
   const listen = useListen();
@@ -78,7 +117,11 @@ export function PlayerLayer() {
   const reducedMotion = useReducedMotion();
   const webview = useRef<ListenWebViewHandle>(null);
   const [subtitlesOpen, setSubtitlesOpen] = useState(false);
+  const [showPage, setShowPage] = useState(false);
+  const stream = useStream(station?.callsign, status, listen.markPlaying);
   const now = useTick(!!station && expanded);
+
+  useEffect(() => setShowPage(false), [station?.callsign]);
 
   const progress = useSharedValue(0);
   useEffect(() => {
@@ -99,18 +142,25 @@ export function PlayerLayer() {
   useEffect(() => {
     if (!expanded) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      collapse();
+      if (showPage) setShowPage(false);
+      else collapse();
       return true;
     });
     return () => sub.remove();
-  }, [expanded, collapse]);
+  }, [expanded, collapse, showPage]);
 
   if (!station) return null;
 
   const url = listenUrl(station.callsign);
   const stillOnline = !data || data.stations.some((s) => s.callsign === station.callsign);
-  const badge = stillOnline ? STATUS_BADGE[status] : { status: 'warning' as const, label: 'Station offline' };
+  const badge = stillOnline
+    ? badgeFor(stream.phase, stream.receiving)
+    : { status: 'warning' as const, label: 'Station offline' };
   const used = usedSeconds(now);
+  const native = stream.phase === 'live' && !showPage;
+
+  const toggleSubtitles = () =>
+    captions.model === 'installed' ? setSubtitles(!subtitles) : setSubtitlesOpen(true);
 
   return (
     <>
@@ -129,18 +179,21 @@ export function PlayerLayer() {
             <Button variant="ghost" size="icon" onPress={collapse} accessibilityLabel="Minimise player">
               <CaretDownIcon size={24} color={tokens.foreground} />
             </Button>
-            <T variant="title-4" muted>
-              Now listening
-            </T>
+            <View className="items-center">
+              <T variant="title-5" muted>
+                Now listening
+              </T>
+              <T variant="readout-xs" muted accessibilityLabel="Session length">
+                {clock(startedAt ? (now - startedAt) / 1000 : 0)}
+              </T>
+            </View>
             <View className="flex-row">
               <Button
                 variant={captions.active ? 'secondary' : 'ghost'}
                 size="icon"
                 // Once the model is on the phone this is a plain toggle; until
                 // then it opens the setup sheet.
-                onPress={() =>
-                  captions.model === 'installed' ? setSubtitles(!subtitles) : setSubtitlesOpen(true)
-                }
+                onPress={toggleSubtitles}
                 onLongPress={() => setSubtitlesOpen(true)}
                 accessibilityLabel={captions.active ? 'Turn subtitles off' : 'Subtitles'}
                 accessibilityState={{ selected: captions.active }}
@@ -174,52 +227,50 @@ export function PlayerLayer() {
             </View>
             <AnimatedBadge
               status={badge.status}
-              pulse={status === 'ready' && stillOnline}
+              pulse={stream.phase === 'live' && stream.receiving && stillOnline}
               contentKey={badge.label}
             >
               {badge.label}
             </AnimatedBadge>
           </View>
 
-          <View className="flex-row gap-3">
-            <View className="flex-1 gap-1 rounded-xl border border-border bg-surface px-4 py-3">
-              <T variant="caption-4" muted>
-                Frequency
-              </T>
-              <T variant="readout-md">{station.frequency}</T>
-            </View>
-            <View className="flex-1 gap-1 rounded-xl border border-border bg-surface px-4 py-3">
-              <T variant="caption-4" muted>
-                Session
-              </T>
-              <T variant="readout-md">{clock(startedAt ? (now - startedAt) / 1000 : 0)}</T>
-            </View>
+          {/* Time actually playing in the last hour, by this phone's count.
+              VATSIM decides any limit and the Listen page says when one applies. */}
+          <View className="flex-row items-center justify-between">
+            <T variant="caption-4" muted>
+              Listened in the last hour
+            </T>
+            <T variant="readout-xs" muted>
+              {used < 60 ? 'under 1 min' : `${Math.floor(used / 60)} min`}
+            </T>
           </View>
 
-          <Meter
-            value={Math.min(used, LISTEN_BUDGET_SECONDS)}
-            maxValue={LISTEN_BUDGET_SECONDS}
-            label="Listen allowance this hour"
-            showValueLabel
-            valueLabel={`${Math.min(15, Math.ceil(used / 60))} of 15 min`}
-            thresholds={[
-              { from: 0, color: 'success' },
-              { from: LISTEN_BUDGET_SECONDS * 0.66, color: 'warning' },
-              { from: LISTEN_BUDGET_SECONDS * 0.9, color: 'destructive' },
-            ]}
-          />
-
-          <CaptionsPanel />
-
           <View className="flex-1 overflow-hidden rounded-2xl border border-border bg-surface">
-            <ListenWebView
-              ref={webview}
-              url={url}
-              background={tokens.background}
-              onStatus={setStatus}
-              captionsOn={captions.active}
-              onPcm={captions.feed}
-            />
+            {native ? null : <PageBanner phase={stream.phase} onBack={() => setShowPage(false)} />}
+            {/* The page stays mounted in the same place whichever view is on
+                top, so switching never reloads it or interrupts the audio. */}
+            <View className="flex-1">
+              <ListenWebView
+                ref={webview}
+                url={url}
+                background={tokens.background}
+                onStatus={setStatus}
+                captionsOn={captions.active}
+                onPcm={captions.feed}
+                onPlaying={stream.onState}
+                onLevel={stream.onLevel}
+                onUrl={stream.onUrl}
+              />
+            </View>
+            {native ? (
+              <LiveStage
+                stream={stream}
+                now={now}
+                frequency={station.frequency}
+                onShowPage={() => setShowPage(true)}
+                onSubtitles={toggleSubtitles}
+              />
+            ) : null}
             {status === 'error' ? (
               <View className="absolute inset-x-0 bottom-0 p-2">
                 <Alert variant="destructive">
@@ -241,16 +292,13 @@ export function PlayerLayer() {
             ) : null}
           </View>
 
-          {/* The subtitles panel needs the room more than this note does. */}
-          {captions.active ? null : (
+          {!backgroundPlaybackAvailable || !backgroundPlayback ? (
             <T variant="caption-5" muted className="text-center">
               {!backgroundPlaybackAvailable
                 ? 'Audio stops when the screen locks in this preview build. Install the app build to keep listening.'
-                : backgroundPlayback
-                  ? 'Keeps playing with the screen off. Sign in with your VATSIM account the first time.'
-                  : 'Background listening is off in Settings, so audio may stop when the screen locks.'}
+                : 'Background listening is off in Settings, so audio may stop when the screen locks.'}
             </T>
-          )}
+          ) : null}
 
           <Button
             variant="secondary"
@@ -263,7 +311,7 @@ export function PlayerLayer() {
         </View>
       </Animated.View>
 
-      {!expanded ? <MiniPlayer onExpand={expand} /> : null}
+      {!expanded ? <MiniPlayer stream={stream} onExpand={expand} /> : null}
       <SubtitlesSheet open={subtitlesOpen} onOpenChange={setSubtitlesOpen} />
     </>
   );
@@ -272,13 +320,13 @@ export function PlayerLayer() {
 const enter = FadeInDown.duration(500).easing(easing);
 const exit = FadeOutDown.duration(300).easing(easing);
 
-function MiniPlayer({ onExpand }: { onExpand: () => void }) {
-  const { station, status, stop } = useListen();
+function MiniPlayer({ stream, onExpand }: { stream: Stream; onExpand: () => void }) {
+  const { station, stop } = useListen();
   const { active, lines, partial } = useCaptions();
   const tokens = useTokens();
   const insets = useSafeAreaInsets();
   if (!station) return null;
-  const badge = STATUS_BADGE[status];
+  const badge = badgeFor(stream.phase, stream.receiving);
   // With subtitles on, the second line follows the frequency as text.
   const lastLine = lines[lines.length - 1];
   const caption = active
@@ -314,7 +362,11 @@ function MiniPlayer({ onExpand }: { onExpand: () => void }) {
                 <T variant="readout-xs" muted>
                   {station.frequency}
                 </T>
-                <T variant="caption-5" muted>
+                <T
+                  variant="caption-5"
+                  muted={!(stream.phase === 'live' && stream.receiving)}
+                  className={stream.phase === 'live' && stream.receiving ? 'text-primary' : undefined}
+                >
                   {badge.label}
                 </T>
               </View>

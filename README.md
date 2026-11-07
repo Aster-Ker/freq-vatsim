@@ -58,7 +58,11 @@ Switching keys means people uninstall the old build once, so it is best done bef
 Freq does not connect to the voice network itself. VATSIM only lets approved clients join Audio for VATSIM, and Listen is VATSIM's route for people who only want to listen. Listen's rules apply:
 
 * You need a VATSIM account. You sign in inside the player the first time and the WebView keeps the session.
-* 15 minutes of listening per hour, and a cap on how many people can listen at once. The player shows a local estimate of the 15 minutes. VATSIM's count is the one that matters.
+* VATSIM can limit listening time per hour and how many people listen at once. The limit is a setting on VATSIM's side that it can change or switch off (it was 15 minutes per hour at launch), so Freq doesn't assume a number. The player shows how long you have listened in the last hour, counting only time the page was playing, and the Listen page says when a limit applies.
+
+### The player
+
+VATSIM Listen keeps running in a WebView inside the player, but it only shows when it needs you: to sign in, to press play, or when it stops (for example when VATSIM limits listening time). Once it is playing, Freq's own screen covers it, with the frequency, a level meter driven by the real audio, a receiving indicator and the subtitles. **Show Listen page** brings the page back at any time. The audio tap in `lib/audio-tap.ts` reports whether the page is playing and how loud it is, so none of this depends on how VATSIM lays out its page.
 
 ### Background audio
 
@@ -117,9 +121,10 @@ components/captions-panel  running transcript in the player
 components/subtitles-sheet subtitles setup and model download
 lib/vatsim.ts              feed parsing, facility mapping, Listen URLs
 lib/feed.tsx               polling, paused while the app is in the background
-lib/listen.tsx             session state, allowance tally, foreground service control
+lib/listen.tsx             session state, listening time tally, foreground service control
 lib/prefs.tsx              saved stations and settings (AsyncStorage)
 lib/audio-tap.ts           script injected into the Listen page to tap its audio
+lib/stream.ts              what the hidden Listen page is doing: phase, audio level, receiving
 lib/captions.tsx           subtitle state: model download, recognizer lifecycle, lines
 lib/atc-text.ts            spoken numbers to ATC notation
 lib/caption-demo.ts        sample subtitles for the web design preview only

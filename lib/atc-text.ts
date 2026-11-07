@@ -6,6 +6,7 @@
  *   "turn left heading two seven zero"          -> "Turn left heading 270"
  *   "contact london one one eight decimal five" -> "Contact london 118.5"
  *   "climb flight level three five zero"        -> "Climb FL350"
+ *   "wind two five zero one two"                -> "Wind 250 at 12"
  */
 const DIGITS: Record<string, string> = {
   zero: '0',
@@ -51,6 +52,9 @@ export function formatTransmission(raw: string): string {
       }
       // "oh" on its own is usually the word, not a zero.
       if (num === '0' && words[i - 1] === 'oh') out.push('oh');
+      // "wind two five zero one two" is a direction and a speed: 250 at 12.
+      else if (out[out.length - 1] === 'wind' && /^\d{5,6}$/.test(num))
+        out.push(`${num.slice(0, 3)} at ${num.slice(3)}`);
       else if (out.length >= 2 && out[out.length - 2] === 'flight' && out[out.length - 1] === 'level') {
         out.splice(out.length - 2, 2, `FL${num}`);
       } else out.push(num);
