@@ -2,10 +2,12 @@ name: Android release
 
 # Builds an installable APK on GitHub's runners.
 #
-# - Push a tag like v1.0.0 to build it and publish a GitHub Release with the
-#   APK attached.
-# - Or run it by hand from the Actions tab ("Run workflow") for a test build;
-#   the APK is then kept as a workflow artifact for 14 days.
+# - Publish a release: run it from the Actions tab ("Run workflow") with a
+#   version such as 1.0.0. It builds the APK, creates the v1.0.0 tag on the
+#   commit it built and publishes a GitHub Release with the APK attached.
+#   Pushing a tag like v1.0.0 does the same.
+# - Test build: run it by hand with the version left empty. The APK is kept as
+#   a workflow artifact for 14 days and nothing is published.
 #
 # Signing: if the repository has the ANDROID_KEYSTORE_* secrets (see the
 # README), the APK is signed with that key. Without them it is signed with the
@@ -16,6 +18,11 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Publish a release with this version, like 1.0.0. Leave empty for a test build.'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -51,12 +58,31 @@ jobs:
 
       - name: Set version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
+          RELEASE_TAG=""
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
-            VERSION="${GITHUB_REF_NAME#v}"
+            RELEASE_TAG="$GITHUB_REF_NAME"
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            RELEASE_TAG="v${INPUT_VERSION#v}"
+          fi
+          if [[ -n "$RELEASE_TAG" ]]; then
+            VERSION="${RELEASE_TAG#v}"
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Version must look like 1.0.0, not '$VERSION'."
+              exit 1
+            fi
+            # Stop before a long build if this version is already out.
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              echo "::error::Release $RELEASE_TAG already exists. Use a new version number."
+              exit 1
+            fi
           else
             VERSION="$(node -p "require('./app.json').expo.version")-dev.${GITHUB_RUN_NUMBER}"
           fi
+          echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           # Every build gets a higher versionCode, so a newer APK installs over an older one.
           node -e "
             const fs = require('fs');
@@ -108,8 +134,8 @@ jobs:
           echo "apk=$APK_OUT" >> "$GITHUB_OUTPUT"
           ls -la "$APK_OUT"
 
-      - name: Keep the APK (manual runs)
-        if: github.ref_type != 'tag'
+      - name: Keep the APK (test builds)
+        if: steps.version.outputs.release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.sign.outputs.apk }}
@@ -117,11 +143,12 @@ jobs:
           retention-days: 14
 
       - name: Publish the release
-        if: github.ref_type == 'tag'
+        if: steps.version.outputs.release_tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           SIGNING: ${{ steps.sign.outputs.signing }}
           APK: ${{ steps.sign.outputs.apk }}
+          TAG: ${{ steps.version.outputs.release_tag }}
         run: |
           {
             echo "Install on Android: download **$APK** below on your phone and open it. Android asks once to allow installs from your browser or file manager."
@@ -132,4 +159,5 @@ jobs:
               echo "> This build is signed with the shared React Native debug key. It installs and updates normally, but the key is public, so only install builds from this page."
             fi
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" "$APK" --title "Freq $GITHUB_REF_NAME" --notes-file notes.md
+          # Creates the tag on the commit that was built, if it does not exist yet.
+          gh release create "$TAG" "$APK" --target "$GITHUB_SHA" --title "Freq $TAG" --notes-file notes.md

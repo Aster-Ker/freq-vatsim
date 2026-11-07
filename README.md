@@ -19,13 +19,9 @@ Download the latest APK from [Releases](https://github.com/Aster-Ker/freq-vatsim
 
 ### Publishing a release
 
-[`.github/workflows/android-release.yml`](.github/workflows/android-release.yml) builds the APK on GitHub's runners. Push a version tag and it publishes a release with the APK attached:
+[`.github/workflows/android-release.yml`](.github/workflows/android-release.yml) builds the APK on GitHub's runners. To publish a version, open the **Actions** tab, choose **Android release**, then **Run workflow**, and enter a version such as `1.0.1`. It builds the APK, tags the commit `v1.0.1` and publishes a release with the APK attached. Pushing a `v*` tag yourself does the same.
 
-```bash
-git tag v1.0.1 && git push origin v1.0.1
-```
-
-You can also run it from the Actions tab (**Android release**, then **Run workflow**) for a test build, which is kept as a downloadable artifact for 14 days.
+Leave the version empty for a test build: the APK is kept as a downloadable artifact for 14 days and nothing is published.
 
 ### Signing key
 
