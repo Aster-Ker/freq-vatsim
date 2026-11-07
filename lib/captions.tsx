@@ -40,9 +40,9 @@ const MAX_LINES = 50;
 const CaptionsContext = createContext<CaptionsState | null>(null);
 
 // The web build is a design preview with no recognizer. It can be shown
-// sample subtitles by setting window.__freqCaptionDemo before the app loads.
+// sample subtitles by setting window.__freqDemo before the app loads.
 const source =
-  Platform.OS === 'web' && typeof window !== 'undefined' && (window as { __freqCaptionDemo?: boolean }).__freqCaptionDemo
+  Platform.OS === 'web' && typeof window !== 'undefined' && (window as { __freqDemo?: boolean }).__freqDemo
     ? demoCaptionSource
     : { available: nativeAvailable, ...nativeCaptions };
 

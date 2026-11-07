@@ -19,7 +19,8 @@ const clockTime = (at: number) => {
  * The running transcript, newest at the bottom. The phrase being spoken shows
  * muted under the last finished line and settles into place when it ends.
  */
-export function CaptionsPanel() {
+/** fill: stretch to the space available instead of a fixed five line window. */
+export function CaptionsPanel({ fill = false }: { fill?: boolean }) {
   const { active, engine, engineError, lines, partial } = useCaptions();
   const { setSubtitles } = usePrefs();
   const tokens = useTokens();
@@ -35,7 +36,13 @@ export function CaptionsPanel() {
     engine === 'starting' ? 'Starting' : engine === 'error' ? (engineError ?? 'Stopped') : 'On this phone';
 
   return (
-    <View className="gap-2 rounded-xl border border-border bg-surface p-3">
+    <View
+      className={
+        fill
+          ? 'flex-1 gap-2 rounded-xl border border-border bg-surface p-3'
+          : 'gap-2 rounded-xl border border-border bg-surface p-3'
+      }
+    >
       <View className="flex-row items-center gap-2">
         <T variant="title-5">Subtitles</T>
         <T
@@ -46,14 +53,19 @@ export function CaptionsPanel() {
         >
           {status}
         </T>
-        <Button variant="ghost" size="xs" onPress={() => setSubtitles(false)} accessibilityLabel="Turn subtitles off">
+        <Button
+          variant="ghost"
+          size="xs"
+          onPress={() => setSubtitles(false)}
+          accessibilityLabel="Turn subtitles off"
+        >
           <XIcon size={14} color={tokens.muted} />
         </Button>
       </View>
 
       <ScrollView
         ref={scroll}
-        style={{ height: 112 }}
+        style={fill ? { flex: 1 } : { height: 112 }}
         contentContainerClassName="gap-2 pb-1"
         accessibilityLiveRegion="polite"
         accessibilityLabel="Subtitles"

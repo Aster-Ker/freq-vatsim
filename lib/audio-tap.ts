@@ -16,8 +16,15 @@
  * Should the page use both for the same sound, only one source is forwarded
  * at a time: the one that last carried sound.
  *
- * Messages: { t: 'pcm', d: base64 } every quarter second while sound is
- * present, and { t: 'tap', sources: n } when a source is found.
+ * Messages to the app:
+ *  - { t: 'state', playing } when the page's playback starts or stops. A
+ *    quiet frequency is still playing; this only turns false when the page's
+ *    audio context stops running or its media element pauses or ends.
+ *  - { t: 'lvl', v } about eight times a second while playing: the loudness,
+ *    0 (silence, -60 dBFS or below) to 1 (-10 dBFS or above).
+ *  - { t: 'pcm', d: base64 } every quarter second while sound is present and
+ *    subtitles are on.
+ *  - { t: 'tap', sources: n } when a source is found.
  *
  * Kept as a plain ES5 string so it runs in any WebView without a build step.
  */
@@ -31,6 +38,7 @@ export const AUDIO_TAP_SCRIPT = String.raw`
   var SILENCE_RMS = 0.002;     // about -54 dBFS
   var TAIL_MS = 1200;          // keep sending this long after sound stops, so the recognizer can end the phrase
   var SWITCH_MS = 1000;        // a quiet source hands over after this long
+  var LEVEL_MS = 120;          // level report interval
 
   var enabled = false;
   var sources = [];
@@ -38,6 +46,9 @@ export const AUDIO_TAP_SCRIPT = String.raw`
   var out = new Int16Array(CHUNK);
   var outLen = 0;
   var lastLoud = 0;
+  var lastLevelAt = 0;
+  var lastPlaying = null;
+  var elements = [];
 
   function post(msg) {
     try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg)); } catch (e) {}
@@ -55,26 +66,56 @@ export const AUDIO_TAP_SCRIPT = String.raw`
     outLen = 0;
   }
 
-  function makeSource(rate) {
-    var src = { id: sources.length + 1, rate: rate, step: rate / TARGET_RATE, pos: 0, prev: 0, loudAt: 0 };
+  // alive() says whether this source is playing right now (not whether it is loud).
+  function makeSource(rate, alive) {
+    var src = { id: sources.length + 1, rate: rate, step: rate / TARGET_RATE, pos: 0, prev: 0, loudAt: 0, alive: alive };
     sources.push(src);
     post({ t: 'tap', sources: sources.length });
+    report();
     return src;
   }
 
+  function report() {
+    var playing = false;
+    for (var i = 0; i < sources.length; i++) {
+      try { if (sources[i].alive()) playing = true; } catch (e) {}
+    }
+    if (playing !== lastPlaying) {
+      lastPlaying = playing;
+      post({ t: 'state', playing: playing });
+    }
+  }
+
+  function elementPlaying() {
+    for (var i = 0; i < elements.length; i++) {
+      var el = elements[i];
+      if (!el.paused && !el.ended && el.isConnected !== false) return true;
+    }
+    return false;
+  }
+
   function handle(src, input) {
-    if (!enabled) return;
     var now = Date.now();
 
     var sum = 0;
     for (var i = 0; i < input.length; i++) sum += input[i] * input[i];
-    var loud = Math.sqrt(sum / input.length) > SILENCE_RMS;
+    var rms = Math.sqrt(sum / input.length);
+    var loud = rms > SILENCE_RMS;
     if (loud) src.loudAt = now;
 
     var current = null;
     for (var j = 0; j < sources.length; j++) if (sources[j].id === activeId) current = sources[j];
     if (!current || (loud && now - current.loudAt > SWITCH_MS)) activeId = src.id;
     if (src.id !== activeId) return;
+
+    if (now - lastLevelAt >= LEVEL_MS) {
+      lastLevelAt = now;
+      var db = rms > 0 ? 20 * Math.log(rms) / Math.LN10 : -100;
+      var v = (db + 60) / 50;
+      post({ t: 'lvl', v: v < 0 ? 0 : v > 1 ? 1 : Math.round(v * 100) / 100 });
+    }
+
+    if (!enabled) return;
 
     if (loud) lastLoud = now;
     if (now - lastLoud > TAIL_MS) {
@@ -109,7 +150,7 @@ export const AUDIO_TAP_SCRIPT = String.raw`
   var origConnect = AudioNode.prototype.connect;
   var taps = typeof WeakMap === 'function' ? new WeakMap() : null;
 
-  function tapFor(ctx) {
+  function tapFor(ctx, alive) {
     var existing = taps && taps.get(ctx);
     if (existing) return existing;
     var proc = ctx.createScriptProcessor(4096, 1, 1);
@@ -120,7 +161,8 @@ export const AUDIO_TAP_SCRIPT = String.raw`
     mute.gain.value = 0;
     origConnect.call(proc, mute);
     origConnect.call(mute, ctx.destination);
-    var src = makeSource(ctx.sampleRate);
+    var src = makeSource(ctx.sampleRate, alive || function () { return ctx.state === 'running'; });
+    try { ctx.addEventListener('statechange', report); } catch (e) {}
     proc.onaudioprocess = function (e) { handle(src, e.inputBuffer.getChannelData(0)); };
     if (taps) taps.set(ctx, proc);
     return proc;
@@ -154,19 +196,28 @@ export const AUDIO_TAP_SCRIPT = String.raw`
       return;
     }
     el.__freqTapped = true;
+    if (elements.indexOf(el) < 0) elements.push(el);
     try {
       ownCtx = ownCtx || new Ctx();
       if (ownCtx.state === 'suspended') ownCtx.resume();
       var node = ownCtx.createMediaStreamSource(stream);
       node.__freqInternal = true;
-      origConnect.call(node, tapFor(ownCtx));
+      // Our own context runs for as long as we like, so it counts as playing
+      // only while one of the page's elements does.
+      origConnect.call(node, tapFor(ownCtx, elementPlaying));
     } catch (e) {
       el.__freqTapped = false;
     }
+    report();
   }
 
   document.addEventListener('play', function (e) { tapElement(e.target); }, true);
-  document.addEventListener('playing', function (e) { tapElement(e.target); }, true);
+  document.addEventListener('playing', function (e) { tapElement(e.target); report(); }, true);
+  document.addEventListener('pause', report, true);
+  document.addEventListener('ended', report, true);
+  document.addEventListener('emptied', report, true);
+  // A safety net for changes no event announces, such as a removed element.
+  setInterval(report, 2000);
 
   window.__freqSetCaptions = function (on) {
     enabled = !!on;

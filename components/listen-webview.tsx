@@ -13,6 +13,12 @@ type Props = {
   /** Forward the page's audio for subtitles. */
   captionsOn: boolean;
   onPcm: (pcmBase64: string) => void;
+  /** The page's playback started or stopped. */
+  onPlaying: (playing: boolean) => void;
+  /** Loudness, 0 to 1, several times a second while playing. */
+  onLevel: (level: number) => void;
+  /** The page navigated, for example to VATSIM's sign in. */
+  onUrl: (url: string) => void;
 };
 
 // The package declares WebView<P = undefined> with props `WebViewProps & P`,
@@ -35,8 +41,8 @@ function isVatsimPage(url: string) {
  * opens in the browser instead.
  */
 export const ListenWebView = forwardRef<ListenWebViewHandle, Props>(function ListenWebView(
-  { url, background, onStatus, captionsOn, onPcm },
-  ref
+  { url, background, onStatus, captionsOn, onPcm, onPlaying, onLevel, onUrl },
+  ref,
 ) {
   const webview = useRef<WebViewInstance>(null);
   useImperativeHandle(ref, () => ({ reload: () => webview.current?.reload() }), []);
@@ -74,7 +80,12 @@ export const ListenWebView = forwardRef<ListenWebViewHandle, Props>(function Lis
       // Listen only receives. Nothing here should ever be granted the microphone.
       mediaCapturePermissionGrantType="deny"
       onShouldStartLoadWithRequest={onNavigation}
-      onLoadStart={() => onStatus('loading')}
+      onLoadStart={() => {
+        // A new page starts silent; its own tap reports when it plays.
+        onPlaying(false);
+        onStatus('loading');
+      }}
+      onNavigationStateChange={(e) => onUrl(e.url)}
       onLoadEnd={(e) => {
         if (!e.nativeEvent.loading) onStatus('ready');
         webview.current?.injectJavaScript(setCaptionsScript(captionsRef.current));
@@ -83,15 +94,17 @@ export const ListenWebView = forwardRef<ListenWebViewHandle, Props>(function Lis
       // page sets up. See lib/audio-tap.ts.
       injectedJavaScriptBeforeContentLoaded={AUDIO_TAP_SCRIPT}
       onMessage={(e) => {
-        const data = e.nativeEvent.data;
-        // Only the tap posts messages, and PCM is by far the most frequent.
-        if (data.startsWith('{"t":"pcm"')) {
-          try {
-            onPcm((JSON.parse(data) as { d: string }).d);
-          } catch {
-            // A malformed message is dropped; the next chunk follows within a quarter second.
-          }
+        // Only the tap posts messages. A malformed one is dropped; the next
+        // follows within a quarter second.
+        let msg: { t?: string; d?: string; v?: number; playing?: boolean };
+        try {
+          msg = JSON.parse(e.nativeEvent.data);
+        } catch {
+          return;
         }
+        if (msg.t === 'pcm' && typeof msg.d === 'string') onPcm(msg.d);
+        else if (msg.t === 'lvl' && typeof msg.v === 'number') onLevel(msg.v);
+        else if (msg.t === 'state') onPlaying(!!msg.playing);
       }}
       onError={() => onStatus('error')}
       onHttpError={(e) => {

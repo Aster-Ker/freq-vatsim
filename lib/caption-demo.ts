@@ -1,6 +1,6 @@
 /**
  * Sample subtitles for the web design preview, which has no recognizer. Only
- * used when window.__freqCaptionDemo is set; never on a phone.
+ * used when window.__freqDemo is set; never on a phone.
  */
 type Listener<T> = (e: T) => void;
 

@@ -18,3 +18,4 @@ export { WifiSlashIcon } from 'phosphor-react-native/src/icons/WifiSlash';
 export { SubtitlesIcon } from 'phosphor-react-native/src/icons/Subtitles';
 export { DownloadSimpleIcon } from 'phosphor-react-native/src/icons/DownloadSimple';
 export { XIcon } from 'phosphor-react-native/src/icons/X';
+export { BrowserIcon } from 'phosphor-react-native/src/icons/Browser';
