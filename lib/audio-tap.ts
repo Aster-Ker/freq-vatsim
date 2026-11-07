@@ -89,7 +89,8 @@ export const AUDIO_TAP_SCRIPT = String.raw`
   function elementPlaying() {
     for (var i = 0; i < elements.length; i++) {
       var el = elements[i];
-      if (!el.paused && !el.ended && el.isConnected !== false) return true;
+      // Not isConnected: a page may play an Audio() it never adds to the document.
+      if (!el.paused && !el.ended) return true;
     }
     return false;
   }
@@ -216,11 +217,42 @@ export const AUDIO_TAP_SCRIPT = String.raw`
   document.addEventListener('pause', report, true);
   document.addEventListener('ended', report, true);
   document.addEventListener('emptied', report, true);
+
+  // An element created with new Audio() and never added to the document
+  // fires its events on itself only, so the listeners above never hear it.
+  // Catch it where it starts instead, and follow it from then on.
+  var origPlay = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function () {
+    var el = this;
+    var result = origPlay.apply(el, arguments);
+    try {
+      if (!el.__freqWatched) {
+        el.__freqWatched = true;
+        ['playing', 'pause', 'ended', 'emptied'].forEach(function (type) {
+          el.addEventListener(type, function () { if (type === 'playing') tapElement(el); report(); });
+        });
+      }
+      tapElement(el);
+    } catch (e) {}
+    return result;
+  };
   // A safety net for changes no event announces, such as a removed element.
   setInterval(report, 2000);
 
+  // The page may play from inside a frame. This script runs in every frame;
+  // the app can only reach the top one, which passes the switch down.
+  function relay(on) {
+    try {
+      for (var i = 0; i < window.frames.length; i++) window.frames[i].postMessage({ __freqCaptions: on }, '*');
+    } catch (e) {}
+  }
+  window.addEventListener('message', function (e) {
+    if (e.data && typeof e.data.__freqCaptions === 'boolean') window.__freqSetCaptions(e.data.__freqCaptions);
+  });
+
   window.__freqSetCaptions = function (on) {
     enabled = !!on;
+    relay(enabled);
     if (!enabled) { outLen = 0; activeId = null; }
     if (ownCtx && ownCtx.state === 'suspended') ownCtx.resume();
     var els = document.querySelectorAll('audio, video');

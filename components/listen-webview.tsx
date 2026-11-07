@@ -93,6 +93,8 @@ export const ListenWebView = forwardRef<ListenWebViewHandle, Props>(function Lis
       // Installed before the page's own scripts, so it sees every sound the
       // page sets up. See lib/audio-tap.ts.
       injectedJavaScriptBeforeContentLoaded={AUDIO_TAP_SCRIPT}
+      // Also in frames, in case the page plays from one.
+      injectedJavaScriptBeforeContentLoadedForMainFrameOnly={false}
       onMessage={(e) => {
         // Only the tap posts messages. A malformed one is dropped; the next
         // follows within a quarter second.
