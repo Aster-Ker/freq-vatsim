@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status bar icon: a mast with two arcs either side. White on transparent, as the platform requires. -->
+<!-- Status bar icon: the Freq mark, seven rounded level bars. White on
+     transparent, as the platform requires; Android tints it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
   android:width="24dp"
   android:height="24dp"
@@ -7,10 +8,5 @@
   android:viewportHeight="24">
   <path
     android:fillColor="#FFFFFFFF"
-    android:pathData="M12,10.5a1.5,1.5 0,1 1,0 3a1.5,1.5 0,1 1,0 -3zM11.25,13.5h1.5L13.5,21h-3z" />
-  <path
-    android:strokeColor="#FFFFFFFF"
-    android:strokeWidth="1.6"
-    android:strokeLineCap="round"
-    android:pathData="M8.5,8.5a5,5 0,0 0,0 7M15.5,8.5a5,5 0,0 1,0 7M5.5,5.5a9,9 0,0 0,0 13M18.5,5.5a9,9 0,0 1,0 13" />
+    android:pathData="M2.55,10.88a0.90,0.90 0,0 1,1.80 0v2.25a0.90,0.90 0,0 1,-1.80 0zM5.40,8.85a0.90,0.90 0,0 1,1.80 0v6.30a0.90,0.90 0,0 1,-1.80 0zM8.25,6.42a0.90,0.90 0,0 1,1.80 0v11.15a0.90,0.90 0,0 1,-1.80 0zM11.10,4.40a0.90,0.90 0,0 1,1.80 0v15.20a0.90,0.90 0,0 1,-1.80 0zM13.95,7.23a0.90,0.90 0,0 1,1.80 0v9.53a0.90,0.90 0,0 1,-1.80 0zM16.80,9.26a0.90,0.90 0,0 1,1.80 0v5.49a0.90,0.90 0,0 1,-1.80 0zM19.65,10.47a0.90,0.90 0,0 1,1.80 0v3.06a0.90,0.90 0,0 1,-1.80 0z" />
 </vector>

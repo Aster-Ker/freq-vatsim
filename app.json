@@ -19,12 +19,15 @@
     "android": {
       "package": "uk.asterkometa.freq",
       "adaptiveIcon": {
-        "backgroundColor": "#000000"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "monochromeImage": "./assets/adaptive-monochrome.png",
+        "backgroundColor": "#5E6AD2"
       }
     },
     "web": {
       "bundler": "metro",
-      "output": "single"
+      "output": "single",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-router",
@@ -36,11 +39,21 @@
             "minSdkVersion": 26
           }
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 140,
+          "resizeMode": "contain",
+          "backgroundColor": "#000000"
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": true
     },
-    "backgroundColor": "#000000"
+    "backgroundColor": "#000000",
+    "icon": "./assets/icon.png"
   }
 }
