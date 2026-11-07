@@ -15,15 +15,36 @@ Built with Expo (SDK 58), [PanelUI](https://panelui.dev) components, Geist and G
 
 ## Get the app
 
-There is no prebuilt download yet. Build an APK for your own phone with Expo's free cloud build service; it needs a free Expo account:
+Download the latest APK from [Releases](https://github.com/Aster-Ker/freq-vatsim/releases/latest) on your Android phone and open it. Android asks once to allow installs from your browser or file manager. It needs Android 8 or later on a 64-bit phone.
+
+### Publishing a release
+
+[`.github/workflows/android-release.yml`](.github/workflows/android-release.yml) builds the APK on GitHub's runners. Push a version tag and it publishes a release with the APK attached:
 
 ```bash
-npm install
-npx eas-cli login
-npx eas-cli build --platform android --profile preview
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
-When the build finishes, open the link or QR code it prints on your phone and install the APK. More options are under [Run it](#run-it).
+You can also run it from the Actions tab (**Android release**, then **Run workflow**) for a test build, which is kept as a downloadable artifact for 14 days.
+
+### Signing key
+
+Without a key of your own, builds are signed with the shared React Native debug key. They install and update normally, but that key is public. To sign with your own key, create one once and keep the file and passwords somewhere safe; Android only accepts an update signed with the same key:
+
+```bash
+keytool -genkeypair -v -keystore freq-release.jks -alias freq -keyalg RSA -keysize 4096 -validity 10000
+```
+
+Then add four repository secrets under Settings, Secrets and variables, Actions:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | output of `base64 -w0 freq-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | the keystore password |
+| `ANDROID_KEY_ALIAS` | `freq` |
+| `ANDROID_KEY_PASSWORD` | the key password (the same as the keystore password unless you set one) |
+
+Switching keys means people uninstall the old build once, so it is best done before you share the first release.
 
 ## How it works
 

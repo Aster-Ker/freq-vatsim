@@ -1,0 +1,135 @@
+name: Android release
+
+# Builds an installable APK on GitHub's runners.
+#
+# - Push a tag like v1.0.0 to build it and publish a GitHub Release with the
+#   APK attached.
+# - Or run it by hand from the Actions tab ("Run workflow") for a test build;
+#   the APK is then kept as a workflow artifact for 14 days.
+#
+# Signing: if the repository has the ANDROID_KEYSTORE_* secrets (see the
+# README), the APK is signed with that key. Without them it is signed with the
+# shared React Native debug key, which installs fine but is not private, and
+# the release notes say so.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Set version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(node -p "require('./app.json').expo.version")-dev.${GITHUB_RUN_NUMBER}"
+          fi
+          # Every build gets a higher versionCode, so a newer APK installs over an older one.
+          node -e "
+            const fs = require('fs');
+            const c = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+            c.expo.version = process.argv[1];
+            c.expo.android.versionCode = Number(process.argv[2]);
+            fs.writeFileSync('app.json', JSON.stringify(c, null, 2));
+          " "$VERSION" "$GITHUB_RUN_NUMBER"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the Android project
+        run: npx expo prebuild --platform android --no-install
+        env:
+          CI: 1
+
+      # 64-bit ARM covers practically every Android phone sold since 2017 and
+      # keeps the download small (the speech engine adds about 10 MB per ABI).
+      - name: Build release APK
+        working-directory: android
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Sign
+        id: sign
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          APK_IN=android/app/build/outputs/apk/release/app-release.apk
+          APK_OUT="freq-${{ steps.version.outputs.version }}-arm64.apk"
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          if [[ -n "$KEYSTORE_BASE64" ]]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            "$BUILD_TOOLS/apksigner" sign \
+              --ks "$RUNNER_TEMP/release.jks" \
+              --ks-pass env:KEYSTORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass env:KEY_PASSWORD \
+              --out "$APK_OUT" "$APK_IN"
+            rm -f "$RUNNER_TEMP/release.jks"
+            echo "signing=release" >> "$GITHUB_OUTPUT"
+          else
+            cp "$APK_IN" "$APK_OUT"
+            echo "signing=debug" >> "$GITHUB_OUTPUT"
+            echo "::warning::No ANDROID_KEYSTORE_BASE64 secret, so the APK is signed with the shared debug key."
+          fi
+          "$BUILD_TOOLS/apksigner" verify --print-certs "$APK_OUT" | head -3
+          echo "apk=$APK_OUT" >> "$GITHUB_OUTPUT"
+          ls -la "$APK_OUT"
+
+      - name: Keep the APK (manual runs)
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.sign.outputs.apk }}
+          path: ${{ steps.sign.outputs.apk }}
+          retention-days: 14
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING: ${{ steps.sign.outputs.signing }}
+          APK: ${{ steps.sign.outputs.apk }}
+        run: |
+          {
+            echo "Install on Android: download **$APK** below on your phone and open it. Android asks once to allow installs from your browser or file manager."
+            echo
+            echo "Needs Android 8 or later on a 64-bit phone. Background listening and on-device subtitles are included."
+            if [[ "$SIGNING" == "debug" ]]; then
+              echo
+              echo "> This build is signed with the shared React Native debug key. It installs and updates normally, but the key is public, so only install builds from this page."
+            fi
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" "$APK" --title "Freq $GITHUB_REF_NAME" --notes-file notes.md
